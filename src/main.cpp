@@ -1,62 +1,84 @@
-#include <Wire.h>
-#include <Adafruit_Sensor.h>
-#include "Adafruit_BMP3XX.h"
+/*
+* Brian R Taylor
+* brian.taylor@bolderflight.com
+* 
+* Copyright (c) 2018 Bolder Flight Systems
+* 
+* Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
+* and associated documentation files (the "Software"), to deal in the Software without restriction, 
+* including without limitation the rights to use, copy, modify, merge, publish, distribute, 
+* sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is 
+* furnished to do so, subject to the following conditions:
+* 
+* The above copyright notice and this permission notice shall be included in all copies or 
+* substantial portions of the Software.
+* 
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING 
+* BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, 
+* DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
 
-#define DebugSerial Serial0
+#include "BMI088.h"
 
-#define I2C_SDA 17
-#define I2C_SCL 16
+#define SPI_CSA 7
+#define SPI_CSG 8
+#define SPI_SCK  9
+#define SPI_MISO 10
+#define SPI_MOSI 11
 
-#define BMP3XX_I2C_ADDRESS 0x77
-#define BMP3XX_I2C_ADDRESS_ALT 0x76
+/* accel object */
+Bmi088Accel accel(SPI,SPI_CSA);
+/* gyro object */
+Bmi088Gyro gyro(SPI,SPI_CSG);
 
-#define SEALEVELPRESSURE_HPA 1013.25
-
-Adafruit_BMP3XX bmp;
-
-void setup() {
-  DebugSerial.begin(115200);
+void setup() 
+{
+  int status;
+  Serial.begin(115200);
   delay(1000);
+  Serial.println("BMI088 test starting");
 
-  DebugSerial.println("Adafruit BMP388 / BMP390 test");
-
-  Wire.begin(I2C_SDA, I2C_SCL);
-
-  if (!bmp.begin_I2C(BMP3XX_I2C_ADDRESS) &&
-      !bmp.begin_I2C(BMP3XX_I2C_ADDRESS_ALT)) {
-    DebugSerial.println("Could not find a valid BMP3 sensor, check wiring!");
-    while (true) {
-      delay(1000);
-    }
+  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
+  /* start the sensors */
+  status = accel.begin();
+  if (status < 0) {
+    Serial.println("Accel Initialization Error");
+    Serial.println(status);
+    while (1) {}
+  }
+  status = gyro.begin();
+  if (status < 0) {
+    Serial.println("Gyro Initialization Error");
+    Serial.println(status);
+    while (1) {}
   }
 
-  bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
-  bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
-  bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
-  bmp.setOutputDataRate(BMP3_ODR_50_HZ);
-
-  DebugSerial.println("BMP3XX sensor found.");
+  Serial.println("BMI088 initialized");
 }
 
-void loop() {
-  if (!bmp.performReading()) {
-    DebugSerial.println("Failed to perform reading.");
-    delay(2000);
-    return;
-  }
-
-  DebugSerial.print("Temperature = ");
-  DebugSerial.print(bmp.temperature);
-  DebugSerial.println(" *C");
-
-  DebugSerial.print("Pressure = ");
-  DebugSerial.print(bmp.pressure / 100.0);
-  DebugSerial.println(" hPa");
-
-  DebugSerial.print("Approx. Altitude = ");
-  DebugSerial.print(bmp.readAltitude(SEALEVELPRESSURE_HPA));
-  DebugSerial.println(" m");
-
-  DebugSerial.println();
+void loop() 
+{
+  /* read the accel */
+  accel.readSensor();
+  /* read the gyro */
+  gyro.readSensor();
+  /* print the data */
+  Serial.print(accel.getAccelX_mss());
+  Serial.print("\t");
+  Serial.print(accel.getAccelY_mss());
+  Serial.print("\t");
+  Serial.print(accel.getAccelZ_mss());
+  Serial.print("\t");
+  Serial.print(gyro.getGyroX_rads());
+  Serial.print("\t");
+  Serial.print(gyro.getGyroY_rads());
+  Serial.print("\t");
+  Serial.print(gyro.getGyroZ_rads());
+  Serial.print("\t");
+  Serial.print(accel.getTemperature_C());
+  Serial.print("\n");
+  /* delay to help with printing */
   delay(50);
 }
