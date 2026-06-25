@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drone AHRS Visualizer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, Segoe UI, system-ui, sans-serif;
+      background: #101316;
+      color: #eef3f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background: #101316;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(16, 19, 22, 0.76);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button {
+      height: 36px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      padding: 0 12px;
+      color: #eef3f7;
+      background: #1d252b;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #263139;
+    }
+
+    button.primary {
+      border-color: #6bc6ff;
+      background: #155f86;
+    }
+
+    button.primary:hover {
+      background: #1b739f;
+    }
+
+    .status {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(92px, 1fr));
+      gap: 8px;
+      width: min(560px, calc(100vw - 24px));
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(16, 19, 22, 0.78);
+      backdrop-filter: blur(14px);
+    }
+
+    .metric span {
+      display: block;
+      color: #8fa1ac;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 17px;
+      line-height: 1.1;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .message {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 2;
+      max-width: min(380px, calc(100vw - 24px));
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(16, 19, 22, 0.78);
+      color: #b8c7d0;
+      font-size: 13px;
+      line-height: 1.35;
+      backdrop-filter: blur(14px);
+    }
+
+    @media (max-width: 720px) {
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .actions {
+        width: 100%;
+      }
+
+      button {
+        flex: 1;
+      }
+
+      .status {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        bottom: 72px;
+      }
+
+      .message {
+        left: 12px;
+        right: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Drone AHRS Visualizer</div>
+    <div class="actions">
+      <button id="connectButton" class="primary">Connect Serial</button>
+      <button id="zeroButton">Zero</button>
+    </div>
+  </div>
+
+  <div class="status">
+    <div class="metric"><span>Roll</span><strong id="rollValue">0.00</strong></div>
+    <div class="metric"><span>Pitch</span><strong id="pitchValue">0.00</strong></div>
+    <div class="metric"><span>Yaw</span><strong id="yawValue">0.00</strong></div>
+    <div class="metric"><span>Heading</span><strong id="headingValue">0.00</strong></div>
+  </div>
+
+  <div id="message" class="message">Connect the ESP32 serial port at 115200 baud.</div>
+
+  <script type="module">
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js";
+
+    const connectButton = document.querySelector("#connectButton");
+    const zeroButton = document.querySelector("#zeroButton");
+    const message = document.querySelector("#message");
+    const rollValue = document.querySelector("#rollValue");
+    const pitchValue = document.querySelector("#pitchValue");
+    const yawValue = document.querySelector("#yawValue");
+    const headingValue = document.querySelector("#headingValue");
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x101316);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(4.2, 3.1, 5.2);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0xddeeff, 0x1b242b, 2.1));
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    keyLight.position.set(4, 6, 3);
+    keyLight.castShadow = true;
+    scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0x7ed8ff, 0.85);
+    fillLight.position.set(-4, 2, -3);
+    scene.add(fillLight);
+
+    const grid = new THREE.GridHelper(8, 16, 0x2f3a42, 0x20272d);
+    grid.position.y = -0.72;
+    scene.add(grid);
+
+    const axes = new THREE.AxesHelper(1.4);
+    axes.position.set(-2.9, -0.68, 2.8);
+    scene.add(axes);
+
+    const drone = new THREE.Group();
+    scene.add(drone);
+
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x31a8ff,
+      roughness: 0.38,
+      metalness: 0.18
+    });
+    const darkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x20282e,
+      roughness: 0.54,
+      metalness: 0.22
+    });
+    const armMaterial = new THREE.MeshStandardMaterial({
+      color: 0xdce8ee,
+      roughness: 0.42,
+      metalness: 0.1
+    });
+    const frontMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffd057,
+      roughness: 0.32,
+      metalness: 0.1
+    });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.28, 1.08), bodyMaterial);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    drone.add(body);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 4), frontMaterial);
+    nose.rotation.x = -Math.PI / 2;
+    nose.rotation.z = Math.PI / 4;
+    nose.position.z = -0.78;
+    nose.castShadow = true;
+    drone.add(nose);
+
+    const armX = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 3.1, 24), armMaterial);
+    armX.rotation.z = Math.PI / 2;
+    armX.castShadow = true;
+    drone.add(armX);
+
+    const armZ = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 2.35, 24), armMaterial);
+    armZ.rotation.x = Math.PI / 2;
+    armZ.castShadow = true;
+    drone.add(armZ);
+
+    const rotorGroup = new THREE.Group();
+    drone.add(rotorGroup);
+
+    const rotorPositions = [
+      [-1.52, 0.02, -1.06],
+      [1.52, 0.02, -1.06],
+      [-1.52, 0.02, 1.06],
+      [1.52, 0.02, 1.06]
+    ];
+
+    for (const [x, y, z] of rotorPositions) {
+      const rotor = new THREE.Group();
+      rotor.position.set(x, y, z);
+
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.025, 12, 48), darkMaterial);
+      ring.rotation.x = Math.PI / 2;
+      ring.castShadow = true;
+      rotor.add(ring);
+
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 24), frontMaterial);
+      hub.castShadow = true;
+      rotor.add(hub);
+
+      const propA = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.025, 0.065), armMaterial);
+      propA.position.y = 0.04;
+      rotor.add(propA);
+
+      const propB = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.025, 0.68), armMaterial);
+      propB.position.y = 0.04;
+      rotor.add(propB);
+
+      rotorGroup.add(rotor);
+    }
+
+    let port;
+    let reader;
+    let readBuffer = "";
+    let connected = false;
+    let receivedSamples = 0;
+    let lastSampleMs = 0;
+    const currentQuaternion = new THREE.Quaternion();
+    const zeroOffset = new THREE.Quaternion();
+    const displayQuaternion = new THREE.Quaternion();
+
+    function setMessage(text) {
+      message.textContent = text;
+    }
+
+    function parseLine(line) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("millis") || trimmed.startsWith("AHRS")) {
+        return;
+      }
+
+      const parts = trimmed.split(",");
+      if (parts.length < 9) {
+        return;
+      }
+
+      const values = parts.map(Number);
+      if (values.some(Number.isNaN)) {
+        return;
+      }
+
+      const [, qx, qy, qz, qw, roll, pitch, yaw, heading] = values;
+      currentQuaternion.set(qx, qy, qz, qw).normalize();
+      displayQuaternion.copy(zeroOffset).multiply(currentQuaternion).normalize();
+      drone.quaternion.copy(displayQuaternion);
+
+      rollValue.textContent = roll.toFixed(2);
+      pitchValue.textContent = pitch.toFixed(2);
+      yawValue.textContent = yaw.toFixed(2);
+      headingValue.textContent = heading.toFixed(2);
+
+      receivedSamples += 1;
+      lastSampleMs = performance.now();
+      setMessage(`Connected. Samples: ${receivedSamples}`);
+    }
+
+    async function readSerial() {
+      const textDecoder = new TextDecoder();
+
+      while (port.readable && connected) {
+        reader = port.readable.getReader();
+        try {
+          while (connected) {
+            const { value, done } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            readBuffer += textDecoder.decode(value, { stream: true });
+            const lines = readBuffer.split(/\r?\n/);
+            readBuffer = lines.pop() ?? "";
+
+            for (const line of lines) {
+              parseLine(line);
+            }
+          }
+        } finally {
+          reader.releaseLock();
+          reader = undefined;
+        }
+      }
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        setMessage("Web Serial needs Chrome or Edge on localhost.");
+        return;
+      }
+
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        connected = true;
+        receivedSamples = 0;
+        lastSampleMs = performance.now();
+        connectButton.textContent = "Disconnect";
+        setMessage("Connected. Waiting for AHRS data...");
+        await readSerial();
+      } catch (error) {
+        setMessage(error.message);
+      }
+    }
+
+    async function disconnectSerial() {
+      connected = false;
+
+      if (reader) {
+        await reader.cancel();
+      }
+
+      if (port) {
+        await port.close();
+      }
+
+      port = undefined;
+      connectButton.textContent = "Connect Serial";
+      setMessage("Disconnected.");
+    }
+
+    connectButton.addEventListener("click", async () => {
+      if (connected) {
+        await disconnectSerial();
+      } else {
+        await connectSerial();
+      }
+    });
+
+    zeroButton.addEventListener("click", () => {
+      zeroOffset.copy(currentQuaternion).invert();
+      setMessage("Current attitude set as zero.");
+    });
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    function animate(time) {
+      requestAnimationFrame(animate);
+
+      if (!connected) {
+        drone.rotation.y = Math.sin(time * 0.0005) * 0.08;
+      } else if (lastSampleMs && performance.now() - lastSampleMs > 2000) {
+        setMessage("Connected, but no fresh AHRS data.");
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
